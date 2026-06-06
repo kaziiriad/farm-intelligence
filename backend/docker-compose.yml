@@ -5,11 +5,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - sqlite_data:/app/data
     env_file:
       - .env
     environment:
+      DATABASE_URL: sqlite+aiosqlite:///data/app.db
       REDIS_URL: redis://redis:6379/0
+      CACHE_BACKEND: redis
     depends_on:
       redis:
         condition: service_healthy
@@ -30,4 +32,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  sqlite_data:
   redis_data:

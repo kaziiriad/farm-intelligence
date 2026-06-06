@@ -1,39 +1,47 @@
 """Application settings loaded from environment via pydantic-settings."""
+import os
 from functools import lru_cache
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from dotenv import load_dotenv
+
+# Load .env file for local dev. In Docker, env vars are injected by compose.
+# Skip if DOTENV_LOAD=0 (used in tests to avoid picking up stale values).
+if os.environ.get("DOTENV_LOAD", "1") == "1":
+    load_dotenv()
 
 
 class Settings(BaseSettings):
-    """All runtime config. Values come from env vars (or .env in dev)."""
+    """All runtime config. Values come from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
 
     # WeatherAI upstream
-    weatherai_api_key: SecretStr | None = None
-    weatherai_base_url: str = "https://api.weather-ai.co"
-    weatherai_timeout_s: float = 10.0
-    weatherai_rate_limit_warn: int = 100
+    weatherai_api_key: SecretStr | None = os.environ.get("WEATHERAI_API_KEY") or None
+    weatherai_base_url: str = os.environ.get("WEATHERAI_BASE_URL", "https://api.weather-ai.co")
+    weatherai_timeout_s: float = float(os.environ.get("WEATHERAI_TIMEOUT_S", "10.0"))
+    weatherai_rate_limit_warn: int = int(os.environ.get("WEATHERAI_RATE_LIMIT_WARN", "100"))
 
     # App
-    app_env: str = "development"
-    log_level: str = "info"
+    app_env: str = os.environ.get("APP_ENV", "development")
+    log_level: str = os.environ.get("LOG_LEVEL", "info")
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./data/app.db"
+    database_url: str = os.environ.get(
+        "DATABASE_URL", "sqlite+aiosqlite:///./data/app.db"
+    )
 
     # Cache
-    cache_backend: str = "redis"  # "redis" or "memory"
-    redis_url: str = "redis://localhost:6379/0"
+    cache_backend: str = os.environ.get("CACHE_BACKEND", "redis")
+    redis_url: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
     # Quota / limits
-    tree_image_max_mb: int = 20
+    tree_image_max_mb: int = int(os.environ.get("TREE_IMAGE_MAX_MB", "20"))
 
     @model_validator(mode="after")
     def _production_requires_key(self) -> "Settings":

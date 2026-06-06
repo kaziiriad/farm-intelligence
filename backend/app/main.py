@@ -1,7 +1,7 @@
 """FastAPI application factory."""
 from fastapi import FastAPI
 
-from app.routers import farms
+from app.routers import advisories, farms
 from app.utils.exceptions import register_exception_handlers
 
 
@@ -18,6 +18,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(farms.router)
+    app.include_router(advisories.router)
     register_exception_handlers(app)
     return app
 

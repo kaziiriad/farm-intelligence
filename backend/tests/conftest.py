@@ -5,6 +5,10 @@ Phase 1+: `engine` (per-test in-memory SQLite), `db_session`, `client` (ASGI).
 """
 from __future__ import annotations
 
+import os
+# Disable dotenv loading before any app module imports config.
+os.environ["DOTENV_LOAD"] = "0"
+
 from collections.abc import AsyncIterator, Callable
 
 import httpx
@@ -23,6 +27,7 @@ from app.core.config import get_settings
 from app.core.database import Base, get_db
 from app.main import create_app
 from app.models.farm import Farm  # noqa: F401 — register table for create_all
+from app.models.advisory import Advisory  # noqa: F401 — register table for create_all
 
 
 class MockTransportBuilder:

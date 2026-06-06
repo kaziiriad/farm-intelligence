@@ -8,7 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.database import Base
-from app.models import farm  # noqa: F401 — register Farm table for autogenerate
+from app.models import advisory, farm  # noqa: F401 — register tables for autogenerate
 
 # Alembic Config object provides access to alembic.ini values
 config = context.config
