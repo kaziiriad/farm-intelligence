@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: kenya-farm-weather-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -e .
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: CACHE_BACKEND
+        value: redis
+      - key: TREE_IMAGE_MAX_MB
+        value: 20
+      - key: WEATHERAI_BASE_URL
+        value: https://api.weather-ai.co
+      - key: WEATHERAI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
