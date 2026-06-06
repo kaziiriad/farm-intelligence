@@ -24,7 +24,7 @@ class AdvisoryOut(BaseModel):
     id: UUID
     farm_id: UUID
     generated_at: datetime
-    daily_scores: list[dict[str, Any]]
+    daily_scores: list[AdvisoryDayScore]
     recommendations: dict[str, Any]
     cached: bool
 
@@ -42,7 +42,7 @@ class OperationOut(BaseModel):
     farm_id: UUID
     operation: str
     recommended: bool
-    priority: str | None = None  # "low", "medium", "high" for irrigation
+    priority: str | None = Field(default=None, pattern="^(low|medium|high)$")
     best_window: str | None = None  # "HH:MM-HH:MM" time window for spraying
     window_date: str | None = None  # ISO date for the window
     reasons: list[str] = Field(default_factory=list)

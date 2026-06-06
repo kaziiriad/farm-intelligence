@@ -48,10 +48,25 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = os.environ.get("OPENAI_API_KEY") or None
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
+    # CORS — comma-separated list of allowed origins for the frontend
+    cors_allowed_origins: str = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+    # Trusted hosts — comma-separated HTTP Host values accepted by the API.
+    allowed_hosts: str = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,test,testserver")
+
+    @property
+    def cors_allowed_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    @property
+    def allowed_host_list(self) -> list[str]:
+        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+
     @model_validator(mode="after")
     def _production_requires_key(self) -> "Settings":
         if self.app_env == "production" and not self.weatherai_api_key:
             raise ValueError("WEATHERAI_API_KEY is required when APP_ENV=production")
+        if self.app_env == "production" and not os.environ.get("ALLOWED_HOSTS"):
+            raise ValueError("ALLOWED_HOSTS is required when APP_ENV=production")
         return self
 
 

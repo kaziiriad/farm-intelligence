@@ -5,6 +5,7 @@ in `tests/conftest.py` to bind each test to a fresh in-memory SQLite DB.
 """
 from collections.abc import AsyncIterator
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,11 +25,39 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def build_engine_config(database_url: str) -> tuple[str, dict]:
+    """Normalize deployment database URLs for SQLAlchemy's async engine.
+
+    Supabase commonly provides a postgresql:// URL with sslmode=require.
+    SQLAlchemy async engines need the asyncpg driver name, and asyncpg expects
+    SSL as a connect argument instead of libpq-style sslmode.
+    """
+    url = make_url(database_url)
+    connect_args: dict = {}
+
+    if url.drivername in {"postgresql", "postgres"}:
+        url = url.set(drivername="postgresql+asyncpg")
+
+    if url.drivername == "postgresql+asyncpg":
+        query = dict(url.query)
+        sslmode = query.pop("sslmode", None)
+        if sslmode:
+            if sslmode == "disable":
+                connect_args["ssl"] = False
+            else:
+                connect_args["ssl"] = True
+            url = url.set(query=query)
+
+    return url.render_as_string(hide_password=False), connect_args
+
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
+        database_url, connect_args = build_engine_config(get_settings().database_url)
         _engine = create_async_engine(
-            get_settings().database_url,
+            database_url,
+            connect_args=connect_args,
             echo=False,
             future=True,
         )
