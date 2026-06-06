@@ -1,78 +1,16 @@
-# Kenya Farm & Weather Intelligence API
+# Farm Intelligence
 
-Monorepo for a FastAPI backend integrating the [WeatherAI](https://weather-ai.co) free tier to give Kenyan farmers and extension officers: farm registration, 7-day agro-weather advisory with deterministic risk scoring, operation-specific go/no-go checks, and drone-image tree/canopy analysis paired with weather forecasts.
+Backend service that combines WeatherAI's weather forecasting and agroforestry image analysis into actionable farm-level advisories. Built with FastAPI, SQLAlchemy async, Redis, and Docker.
 
-**Status:** Phase 8 (Docker, observability, README) complete. All phases done.
+## What it does
 
-| Phase | Feature | Status |
-|-------|---------|--------|
-| 0 | Scaffolding — FastAPI + SQLAlchemy async + Alembic + Docker | ✅ |
-| 1 | Farm CRUD — create/read/update/delete farms | ✅ |
-| 2 | Cache + WeatherClient — Redis cache-aside, WeatherAI integration | ✅ |
-| 3 | Advisory Engine + Endpoint — 7-day risk scoring, persistence | ✅ |
-| 4 | Operation Advisories — spraying/irrigation/harvesting go/no-go | ✅ |
-| 5 | Tree Analysis + Quota Guard — AI vision, 100/month free tier | ✅ |
-| 6 | Tree Analysis History — paginated GET /tree-analyses | ✅ |
-| 7 | Usage Endpoint — aggregated API usage summary | ✅ |
-| 8 | Docker, observability, README | ✅ |
+Given a registered farm (coordinates + crop type), the API:
 
-## Layout
-```
-kenya_farm_weather_api/
-├── backend/           # FastAPI service (this build)
-└── frontend/          # placeholder, deferred
-```
-
-The full phased build plan lives at `/mnt/e/weatherai_project/.claude/plan/kenya_farm_weather_api_build_plan.md`.
-
-## Backend quick start
-
-All commands run from `backend/`.
-
-### Prerequisites
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Docker (for Redis)
-- A [WeatherAI](https://weather-ai.co) free-tier API key
-
-### Install dependencies
-```bash
-cd backend
-uv venv
-uv pip install -e ".[dev]"
-```
-
-### Configure environment
-Create `backend/.env` with:
-```dotenv
-WEATHERAI_API_KEY=your-key-here
-WEATHERAI_BASE_URL=https://api.weather-ai.co
-WEATHERAI_TIMEOUT_S=10
-APP_ENV=development
-LOG_LEVEL=info
-DATABASE_URL=sqlite+aiosqlite:///./data/app.db
-CACHE_BACKEND=redis
-REDIS_URL=redis://localhost:6379/0
-WEATHERAI_RATE_LIMIT_WARN=100
-TREE_IMAGE_MAX_MB=20
-TREE_QUOTA_LIMIT=100
-OPENAI_API_KEY=your-key-here   # for tree image analysis
-OPENAI_BASE_URL=https://api.openai.com/v1
-```
-
-### Start Redis
-```bash
-cd backend
-docker compose up -d redis
-```
-
-### Run the API
-```bash
-cd backend
-source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
-```
-Swagger UI: <http://localhost:8000/docs>
+- Generates a **7-day agro-weather advisory** with deterministic risk scores for rain, heat, wind, and irrigation need
+- Answers **operation go/no-go questions** — is today safe for spraying, irrigation, or harvesting?
+- **Analyzes tree health** from drone/aerial images using AI vision (OpenAI GPT-4o-mini), paired with the farm's weather forecast in a single response
+- **Persists all results** so history can be compared over time
+- **Guards free-tier quota** — caches weather responses, blocks tree analysis when monthly limit is reached
 
 ## API endpoints
 
@@ -85,28 +23,140 @@ Swagger UI: <http://localhost:8000/docs>
 | DELETE | `/api/v1/farms/{id}` | Delete farm |
 | GET | `/api/v1/farms/{id}/advisory` | 7-day weather advisory with risk scores |
 | GET | `/api/v1/farms/{id}/advisories` | Advisory history (paginated) |
-| GET | `/api/v1/farms/{id}/operations/{type}` | Operation go/no-go (spraying/irrigation/harvesting) |
+| GET | `/api/v1/farms/{id}/operations/{type}` | Go/no-go for spraying / irrigation / harvesting |
 | POST | `/api/v1/farms/{id}/tree-analysis` | Upload tree image for AI health analysis |
 | GET | `/api/v1/farms/{id}/tree-analyses` | Tree analysis history (paginated) |
 | GET | `/api/v1/farms/{id}/quota` | Tree analysis quota usage |
 | GET | `/api/v1/usage` | Aggregated API usage summary |
+| GET | `/health` | Liveness probe |
+| GET | `/health/ready` | Readiness probe (checks DB + Redis) |
 
-## Tests
+## Risk scoring
+
+Each day is scored across four factors (max 100 total):
+
+| Factor | Max pts | Thresholds |
+|--------|---------|------------|
+| Rain | 40 | ≥70% → 40 · ≥40% → 20 · else → 0 |
+| Heat | 25 | ≥35°C → 25 · ≥30°C → 12 · else → 0 |
+| Wind | 20 | ≥30 km/h → 20 · ≥15 km/h → 10 · else → 0 |
+| Humidity | 15 | ≥85% → 15 · ≥65% → 7 · else → 0 |
+
+Overall band: `low` (0–30) · `medium` (31–65) · `high` (66+)
+
+## Setup
+
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended)
+- Docker (for Redis)
+
+### Install dependencies
+
 ```bash
 cd backend
-source .venv/bin/activate
+uv venv
+uv pip install -e ".[dev]"
+```
+
+### Configure environment
+
+Create `backend/.env`:
+
+```dotenv
+# WeatherAI
+WEATHERAI_API_KEY=your-weatherai-key
+WEATHERAI_BASE_URL=https://api.weather-ai.co
+WEATHERAI_TIMEOUT_S=10
+
+# App
+APP_ENV=development
+LOG_LEVEL=info
+
+# Database
+DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+
+# Cache
+CACHE_BACKEND=redis
+REDIS_URL=redis://localhost:6379/0
+
+# Tree analysis (OpenAI)
+OPENAI_API_KEY=your-openai-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+TREE_IMAGE_MAX_MB=20
+TREE_QUOTA_LIMIT=100
+```
+
+### Start Redis
+
+```bash
+cd backend
+docker compose up -d redis
+```
+
+### Run migrations
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+### Start the API
+
+```bash
+cd backend
+uvicorn app.main:app --reload --port 8000
+```
+
+Swagger UI: <http://localhost:8000/docs>
+
+## Tests
+
+```bash
+cd backend
 pytest -q
 pytest --cov=app --cov-report=term-missing
 ```
 
-## Backend module layout
+## Architecture
+
 ```
-backend/app/
-├── main.py             # FastAPI app factory
-├── core/               # config + database engine/session
-├── utils/              # exception handlers, helpers
-├── models/             # SQLAlchemy ORM
-├── routers/            # FastAPI routers
-├── schemas/            # Pydantic v2 schemas
-└── services/           # external clients + business logic
+backend/
+├── app/
+│   ├── main.py              # FastAPI app factory
+│   ├── core/
+│   │   ├── config.py        # pydantic-settings + dotenv
+│   │   ├── database.py      # SQLAlchemy async engine + session
+│   │   └── cache.py        # Redis cache (fakeredis for tests)
+│   ├── middleware/
+│   │   └── logging.py      # Request ID + structured JSON logs
+│   ├── models/             # SQLAlchemy ORM (Farm, Advisory, QuotaRecord, TreeAnalysis)
+│   ├── routers/           # FastAPI routers (farms, advisories, trees, usage)
+│   ├── schemas/           # Pydantic v2 request/response schemas
+│   ├── services/
+│   │   ├── weather_client.py    # WeatherAI integration + cache-aside
+│   │   ├── advisory_engine.py   # Deterministic risk scoring
+│   │   ├── quota_guard.py      # Monthly quota tracking per farm
+│   │   └── tree_client.py       # OpenAI Vision tree analysis
+│   └── utils/
+│       └── exceptions.py   # Custom exception handlers
+├── migrations/             # Alembic schema migrations
+├── tests/                 # pytest + AsyncMock
+├── Dockerfile
+├── docker-compose.yml
+└── pyproject.toml
 ```
+
+## Tech stack
+
+| Component | Choice |
+|-----------|--------|
+| Backend | FastAPI (async) |
+| Database | SQLite (dev) / PostgreSQL (prod) via SQLAlchemy 2.0 async |
+| Cache | Redis (prod) / in-memory dict (dev) |
+| HTTP client | httpx.AsyncClient |
+| Validation | Pydantic v2 |
+| Migrations | Alembic |
+| Testing | pytest + pytest-asyncio |
+| Containerisation | Docker + Docker Compose |
