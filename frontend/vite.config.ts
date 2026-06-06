@@ -6,6 +6,9 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+const nitroPreset = process.env.NITRO_PRESET ?? "node-server";
+const isVercel = nitroPreset === "vercel";
+
 export default defineConfig({
   vite: {
     build: {
@@ -18,16 +21,16 @@ export default defineConfig({
     },
   },
   nitro: {
-    preset: "node-server",
-    output: {
-      dir: ".output",
-      serverDir: ".output/server",
-      publicDir: ".output/public",
-    },
+    preset: nitroPreset,
+    ...(!isVercel && {
+      output: {
+        dir: ".output",
+        serverDir: ".output/server",
+        publicDir: ".output/public",
+      },
+    }),
   },
   tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
     server: { entry: "server" },
   },
 });
