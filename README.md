@@ -1,16 +1,16 @@
 # Farm Intelligence
 
-Backend service that combines WeatherAI's weather forecasting and agroforestry image analysis into actionable farm-level advisories. Built with FastAPI, SQLAlchemy async, Redis, and Docker.
+Backend service that combines WeatherAI's weather forecasting and agroforestry image analysis into actionable farm-level advisories for Kenyan farms (tea, maize, coffee, beans, vegetables). Built with FastAPI, SQLAlchemy async, Redis, and Docker.
 
 ## What it does
 
 Given a registered farm (coordinates + crop type), the API:
 
 - Generates a **7-day agro-weather advisory** with deterministic risk scores for rain, heat, wind, and irrigation need
-- Answers **operation go/no-go questions** — is today safe for spraying, irrigation, or harvesting?
-- **Analyzes tree health** from drone/aerial images using AI vision (OpenAI GPT-4o-mini), paired with the farm's weather forecast in a single response
+- Answers **operation go/no-go questions** — is today safe for spraying, irrigation, harvesting, planting, or field work?
+- **Analyzes tree health** from drone/aerial images via WeatherAI tree analysis API (tree count, canopy health, observations), optionally paired with current weather in a single response
 - **Persists all results** so history can be compared over time
-- **Guards free-tier quota** — caches weather responses, blocks tree analysis when monthly limit is reached
+- **Guards free-tier quota** — caches weather responses, proxies tree quota to WeatherAI upstream, blocks when limit is reached
 
 ## API endpoints
 
@@ -23,11 +23,11 @@ Given a registered farm (coordinates + crop type), the API:
 | DELETE | `/api/v1/farms/{id}` | Delete farm |
 | GET | `/api/v1/farms/{id}/advisory` | 7-day weather advisory with risk scores |
 | GET | `/api/v1/farms/{id}/advisories` | Advisory history (paginated) |
-| GET | `/api/v1/farms/{id}/operations/{type}` | Go/no-go for spraying / irrigation / harvesting |
-| POST | `/api/v1/farms/{id}/tree-analysis` | Upload tree image for AI health analysis |
+| GET | `/api/v1/farms/{id}/operations/{type}` | Go/no-go for 5 operations (spraying/irrigation/harvesting/planting/field_work) |
+| POST | `/api/v1/farms/{id}/tree-analysis` | Upload tree image for AI health analysis (with_weather=true fetches weather in parallel) |
 | GET | `/api/v1/farms/{id}/tree-analyses` | Tree analysis history (paginated) |
-| GET | `/api/v1/farms/{id}/quota` | Tree analysis quota usage |
-| GET | `/api/v1/usage` | Aggregated API usage summary |
+| GET | `/api/v1/farms/{id}/quota` | Tree analysis quota from WeatherAI |
+| GET | `/api/v1/weather-ai/usage` | Three quota families (api/ai/trees) + status band |
 | GET | `/health` | Liveness probe |
 | GET | `/health/ready` | Readiness probe (checks DB + Redis) |
 
@@ -81,11 +81,8 @@ DATABASE_URL=sqlite+aiosqlite:///./data/app.db
 CACHE_BACKEND=redis
 REDIS_URL=redis://localhost:6379/0
 
-# Tree analysis (OpenAI)
-OPENAI_API_KEY=your-openai-key
-OPENAI_BASE_URL=https://api.openai.com/v1
+# Tree analysis (WeatherAI — 5 free analyses/month)
 TREE_IMAGE_MAX_MB=20
-TREE_QUOTA_LIMIT=100
 ```
 
 ### Start Redis
@@ -131,14 +128,14 @@ backend/
 │   │   └── cache.py        # Redis cache (fakeredis for tests)
 │   ├── middleware/
 │   │   └── logging.py      # Request ID + structured JSON logs
-│   ├── models/             # SQLAlchemy ORM (Farm, Advisory, QuotaRecord, TreeAnalysis)
+│   ├── models/             # SQLAlchemy ORM (Farm, Advisory, TreeAnalysis, WeatherApiLog)
 │   ├── routers/           # FastAPI routers (farms, advisories, trees, usage)
 │   ├── schemas/           # Pydantic v2 request/response schemas
 │   ├── services/
-│   │   ├── weather_client.py    # WeatherAI integration + cache-aside
-│   │   ├── advisory_engine.py   # Deterministic risk scoring
-│   │   ├── quota_guard.py      # Monthly quota tracking per farm
-│   │   └── tree_client.py       # OpenAI Vision tree analysis
+│   │   ├── weather_client.py    # WeatherAI integration + cache-aside + call logging
+│   │   ├── advisory_engine.py   # Deterministic risk scoring + operation windows
+│   │   ├── quota_guard.py      # Proxies tree quota to WeatherAI upstream (no local writes)
+│   │   └── tree_client.py       # WeatherAI tree analysis proxy
 │   └── utils/
 │       └── exceptions.py   # Custom exception handlers
 ├── migrations/             # Alembic schema migrations

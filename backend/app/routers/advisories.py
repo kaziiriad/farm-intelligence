@@ -1,7 +1,8 @@
 """Advisory endpoint — fetches weather, scores it, persists advisory."""
+import asyncio
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -17,7 +18,12 @@ from app.core.database import get_db
 from app.models.advisory import Advisory
 from app.models.farm import Farm
 from app.schemas.advisory import AdvisoryList, AdvisoryOut, OperationOut
-from app.services.advisory_engine import generate_advisory, generate_operation_advisory, generate_recommendations
+from app.services.advisory_engine import (
+    generate_advisory,
+    generate_operation_advisory,
+    generate_operation_window,
+    generate_recommendations,
+)
 from app.services.weather_client import WeatherClient
 
 
@@ -56,6 +62,7 @@ async def get_advisory(
             base_url=settings.weatherai_base_url,
             api_key=settings.weatherai_api_key.get_secret_value() if settings.weatherai_api_key else None,
         )
+        weather_client.set_db(db)
         try:
             weather = await weather_client.get_daily(
                 lat=farm.latitude,
@@ -161,11 +168,11 @@ async def list_advisories(
     )
 
 
-VALID_OPERATIONS: list[str] = ["spraying", "irrigation", "harvesting"]
+VALID_OPERATIONS: list[str] = ["spraying", "irrigation", "harvesting", "planting", "field_work"]
 
 
 class OperationQuery(BaseModel):
-    operation: Literal["spraying", "irrigation", "harvesting"]
+    operation: str
 
 
 @router.get(
@@ -180,9 +187,10 @@ class OperationQuery(BaseModel):
 async def get_operation_advisory(
     farm_id: uuid.UUID,
     operation: str,
+    date: str | None = Query(None, description="Date for window calculation (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ) -> OperationOut:
-    """Operation-specific advisory (spraying / irrigation / harvesting)."""
+    """Operation-specific advisory (spraying / irrigation / harvesting / planting / field_work)."""
     if operation not in VALID_OPERATIONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -195,6 +203,7 @@ async def get_operation_advisory(
 
     settings = get_settings()
     cache = _build_cache()
+
     async with httpx.AsyncClient() as http_client:
         weather_client = WeatherClient(
             http_client,
@@ -202,19 +211,19 @@ async def get_operation_advisory(
             base_url=settings.weatherai_base_url,
             api_key=settings.weatherai_api_key.get_secret_value() if settings.weatherai_api_key else None,
         )
-        try:
-            weather = await weather_client.get_daily(
-                lat=farm.latitude,
-                lon=farm.longitude,
-            )
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"WeatherAI request failed: {exc.response.status_code}",
-            ) from exc
+        weather_client.set_db(db)
 
-    daily_forecast_raw = weather.get("daily", [])
-    is_cached = weather.get("meta", {}).get("cached", False)
+        # Fan out daily + hourly in parallel when date is provided
+        if date:
+            daily_task = weather_client.get_daily(lat=farm.latitude, lon=farm.longitude)
+            hourly_task = weather_client.get_hourly(lat=farm.latitude, lon=farm.longitude)
+            daily_weather, hourly_weather = await asyncio.gather(daily_task, hourly_task)
+        else:
+            daily_weather = await weather_client.get_daily(lat=farm.latitude, lon=farm.longitude)
+            hourly_weather = {"hourly": []}
+
+    daily_forecast_raw = daily_weather.get("daily", [])
+    is_cached = daily_weather.get("meta", {}).get("cached", False)
 
     daily_forecast = [
         {
@@ -237,12 +246,26 @@ async def get_operation_advisory(
 
     result = generate_operation_advisory(operation, daily_scores)
 
+    # Compute time window if date provided
+    best_window = result.get("best_window")
+    window_date = None
+    if date and best_window is None:
+        hourly_list = hourly_weather.get("hourly", [])
+        window_result = generate_operation_window(operation, hourly_list)
+        best_window = window_result.get("best_window")
+        window_date = window_result.get("window_date")
+        if window_result.get("reasons"):
+            result["reasons"].extend(window_result["reasons"])
+        if not window_result.get("recommended", True):
+            result["recommended"] = False
+
     return OperationOut(
         farm_id=farm_id,
         operation=operation,
         recommended=result["recommended"],
         priority=result.get("priority"),
-        best_window=result.get("best_window"),
+        best_window=best_window,
+        window_date=window_date,
         reasons=result["reasons"],
         cached=is_cached,
     )
