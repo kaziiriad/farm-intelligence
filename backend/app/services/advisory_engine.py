@@ -112,3 +112,80 @@ def generate_recommendations(conditions: dict[str, Any]) -> dict[str, Any]:
         "irrigation": {"need": irrigation_need},
         "harvesting": {"status": harvesting_status},
     }
+
+
+def generate_operation_advisory(
+    operation: str,
+    daily_scores: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build operation-specific response for a single operation type.
+
+    Returns dict with keys: recommended, priority, best_window, reasons.
+    """
+    reasons: list[str] = []
+    recommended = True
+    priority: str | None = None
+    best_window: str | None = None
+
+    if operation == "spraying":
+        for day in daily_scores:
+            rain_score = day.get("rain_score", 0)
+            wind_score = day.get("wind_score", 0)
+            rain_prob = day.get("rain_probability", 0.0)
+            wind_speed = day.get("wind_speed_max", 0.0)
+
+            rain_risk = "high" if rain_score >= 40 else "medium" if rain_score >= 20 else "low"
+            wind_risk = "high" if wind_score >= 20 else "medium" if wind_score >= 10 else "low"
+
+            if rain_risk == "high":
+                reasons.append(f"Rain risk high on {day['date']}")
+                recommended = False
+            elif wind_risk == "high":
+                reasons.append(f"Wind risk high on {day['date']}")
+                recommended = False
+
+        # Best window: first day where both rain and wind risk are low
+        if recommended:
+            for day in daily_scores:
+                rain_score = day.get("rain_score", 0)
+                wind_score = day.get("wind_score", 0)
+                if rain_score == 0 and wind_score == 0:
+                    best_window = day["date"]
+                    break
+
+    elif operation == "irrigation":
+        if not daily_scores:
+            priority = "medium"
+        else:
+            day = daily_scores[0]  # use today
+            rain_prob = day.get("rain_probability", 0.0)
+            temp_max = day.get("temperature_max", 0.0)
+            if rain_prob >= 70.0:
+                priority = "low"
+            elif rain_prob >= 40.0:
+                priority = "medium"
+            else:
+                priority = "high" if temp_max >= 30.0 else "medium"
+        recommended = priority != "low"
+
+    elif operation == "harvesting":
+        if not daily_scores:
+            recommended = True
+        else:
+            day = daily_scores[0]
+            risk_band = day.get("risk_band", "low")
+            if risk_band == "high":
+                reasons.append(f"Overall risk is high on {day['date']}")
+                recommended = False
+            elif risk_band == "medium":
+                reasons.append(f"Overall risk is medium on {day['date']} — proceed with caution")
+                recommended = True
+            else:
+                recommended = True
+
+    return {
+        "recommended": recommended,
+        "priority": priority,
+        "best_window": best_window,
+        "reasons": reasons,
+    }

@@ -35,3 +35,14 @@ class AdvisoryList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class OperationOut(BaseModel):
+    """Response body for operation-specific advisory."""
+    farm_id: UUID
+    operation: str
+    recommended: bool
+    priority: str | None = None  # "low", "medium", "high" for irrigation
+    best_window: str | None = None  # ISO date for spraying best window
+    reasons: list[str] = Field(default_factory=list)
+    cached: bool
