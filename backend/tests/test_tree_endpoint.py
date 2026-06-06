@@ -230,3 +230,50 @@ async def test_tree_analysis_image_too_large_returns_413(client):
             )
 
     assert resp.status_code == 413
+
+
+async def test_list_tree_analyses_pagination(client, db_session):
+    """GET /api/v1/farms/{id}/tree-analyses returns paginated history."""
+    farm_payload = {
+        "farmer_name": "History Tree Farmer",
+        "county": "Nairobi",
+        "crop_type": "tea",
+        "latitude": -1.0,
+        "longitude": 37.0,
+    }
+    farm_resp = await client.post("/api/v1/farms", json=farm_payload)
+    farm_id = farm_resp.json()["id"]
+
+    mock_analysis_result = {"health_status": "healthy", "confidence": 0.92, "issues": []}
+
+    with patch("app.routers.trees.QuotaGuard") as MockQG:
+        mock_qg = AsyncMock()
+        mock_qg.check_and_increment.return_value = True
+        mock_qg.get_remaining.return_value = 99
+        MockQG.return_value = mock_qg
+
+        with patch("app.routers.trees.TreeAnalysisClient") as MockTC:
+            mock_tc = AsyncMock()
+            mock_tc.analyze_tree_image = AsyncMock(return_value=mock_analysis_result)
+            MockTC.return_value = mock_tc
+
+            # Create 3 tree analyses
+            for _ in range(3):
+                await client.post(
+                    f"/api/v1/farms/{farm_id}/tree-analysis",
+                    files={"image": ("tree.jpg", b"fake", "image/jpeg")},
+                )
+
+    # Paginate
+    resp = await client.get(f"/api/v1/farms/{farm_id}/tree-analyses?limit=2&offset=0")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["items"]) == 2
+    assert body["total"] == 3
+
+
+async def test_list_tree_analyses_404_unknown_farm(client):
+    """Unknown farm returns 404."""
+    fake_id = str(uuid.uuid4())
+    resp = await client.get(f"/api/v1/farms/{fake_id}/tree-analyses")
+    assert resp.status_code == 404

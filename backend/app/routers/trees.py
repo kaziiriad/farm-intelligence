@@ -3,7 +3,8 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import RedisCache
@@ -11,6 +12,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.farm import Farm
 from app.models.tree_analysis import TreeAnalysis
+from app.schemas.tree import TreeAnalysisList, TreeAnalysisOut
 from app.services.quota_guard import QuotaGuard
 from app.services.tree_client import TreeAnalysisClient
 
@@ -118,3 +120,42 @@ async def get_quota(
         "used": settings.tree_quota_limit - remaining,
         "remaining": remaining,
     }
+
+
+@router.get(
+    "/{farm_id}/tree-analyses",
+    response_model=TreeAnalysisList,
+)
+async def list_tree_analyses(
+    farm_id: uuid.UUID,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> TreeAnalysisList:
+    """Paginated tree analysis history for a farm."""
+    farm = await db.get(Farm, farm_id)
+    if farm is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
+
+    total = (
+        await db.execute(
+            select(func.count()).select_from(TreeAnalysis).where(TreeAnalysis.farm_id == farm_id)
+        )
+    ).scalar_one()
+
+    rows = (
+        await db.execute(
+            select(TreeAnalysis)
+            .where(TreeAnalysis.farm_id == farm_id)
+            .order_by(TreeAnalysis.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    return TreeAnalysisList(
+        items=[TreeAnalysisOut.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
