@@ -2,7 +2,7 @@
 
 Monorepo for a FastAPI backend integrating the [WeatherAI](https://weather-ai.co) free tier to give Kenyan farmers and extension officers: farm registration, 7-day agro-weather advisory with deterministic risk scoring, operation-specific go/no-go checks, and drone-image tree/canopy analysis paired with weather forecasts.
 
-**Status:** Phases 0–7 complete. Phase 8 (Docker, observability, README) in progress.
+**Status:** Phase 8 (Docker, observability, README) complete. All phases done.
 
 | Phase | Feature | Status |
 |-------|---------|--------|
@@ -13,8 +13,8 @@ Monorepo for a FastAPI backend integrating the [WeatherAI](https://weather-ai.co
 | 4 | Operation Advisories — spraying/irrigation/harvesting go/no-go | ✅ |
 | 5 | Tree Analysis + Quota Guard — AI vision, 100/month free tier | ✅ |
 | 6 | Tree Analysis History — paginated GET /tree-analyses | ✅ |
-| 7 | Usage Endpoint — aggregated API usage summary | 🔜 |
-| 8 | Docker, observability, README | 🔜 |
+| 7 | Usage Endpoint — aggregated API usage summary | ✅ |
+| 8 | Docker, observability, README | ✅ |
 
 ## Layout
 ```
