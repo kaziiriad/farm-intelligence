@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
     # CORS — comma-separated list of allowed origins for the frontend
-    cors_allowed_origins: str = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+    cors_allowed_origins: str = os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+    )
     # Trusted hosts — comma-separated HTTP Host values accepted by the API.
     allowed_hosts: str = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,test,testserver")
 

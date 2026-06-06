@@ -55,3 +55,10 @@ logs/
 
 # Alembic compiled
 alembic/versions/*.pyc
+
+backend/.env
+backend/.coverage
+backend/.venv/
+backend/htmlcov/
+backend/data/
+caches / __pycache__

@@ -116,6 +116,45 @@ pytest -q
 pytest --cov=app --cov-report=term-missing
 ```
 
+## Deploy backend on Render
+
+This repo includes `render.yaml` for deploying the FastAPI backend as a Render
+web service. Use Supabase Postgres for production data; do not use SQLite on
+Render free services because their local filesystem is ephemeral.
+
+### Required Render environment variables
+
+Set these on the Render service:
+
+```dotenv
+APP_ENV=production
+WEATHERAI_API_KEY=your-weatherai-key
+DATABASE_URL=postgresql://postgres:<password>@<supabase-host>:5432/postgres?sslmode=require
+REDIS_URL=rediss://default:<password>@<upstash-host>:6379
+CORS_ALLOWED_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
+ALLOWED_HOSTS=your-render-service.onrender.com
+```
+
+`DATABASE_URL` can be the Supabase connection string. The app normalizes
+`postgresql://` to SQLAlchemy's async `postgresql+asyncpg://` driver at runtime.
+`CORS_ALLOWED_ORIGINS` controls which browser origins can call the API.
+`ALLOWED_HOSTS` controls which HTTP Host headers the API accepts; include your
+Render service hostname, without `https://`.
+
+Render commands from `render.yaml`:
+
+```bash
+pip install --upgrade pip && pip install -e .
+alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+After deployment, check:
+
+```text
+https://<render-service>.onrender.com/health
+https://<render-service>.onrender.com/health/ready
+```
+
 ## Architecture
 
 ```

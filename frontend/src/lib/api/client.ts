@@ -12,11 +12,21 @@ export class ApiError extends Error {
 }
 
 export function getApiBaseUrl(): string {
-  // Vite exposes env via import.meta.env; spec called for NEXT_PUBLIC_API_BASE_URL
-  // but this project is TanStack Start/Vite. Use VITE_API_BASE_URL with a fallback.
-  const raw =
+  // Vercel exposes runtime env via process.env on the server, while Vite
+  // exposes build-time public env via import.meta.env in the browser bundle.
+  const viteEnv =
     (import.meta as unknown as { env?: Record<string, string | undefined> })
-      .env?.VITE_API_BASE_URL ?? "http://localhost:8000";
+      .env ?? {};
+  const processEnv = (globalThis as unknown as {
+    process?: { env?: Record<string, string | undefined> };
+  }).process?.env;
+  const raw =
+    typeof window === "undefined"
+      ? (processEnv?.API_INTERNAL_BASE_URL ??
+          processEnv?.VITE_API_BASE_URL ??
+          viteEnv.VITE_API_BASE_URL ??
+          "http://localhost:8000")
+      : (viteEnv.VITE_API_BASE_URL ?? "http://localhost:8000");
   return raw.replace(/\/+$/, "");
 }
 
