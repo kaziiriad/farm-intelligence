@@ -28,6 +28,8 @@ from app.core.database import Base, get_db
 from app.main import create_app
 from app.models.farm import Farm  # noqa: F401 — register table for create_all
 from app.models.advisory import Advisory  # noqa: F401 — register table for create_all
+from app.models.quota import QuotaRecord  # noqa: F401 — register table for create_all
+from app.models.tree_analysis import TreeAnalysis  # noqa: F401 — register table for create_all
 
 
 class MockTransportBuilder:

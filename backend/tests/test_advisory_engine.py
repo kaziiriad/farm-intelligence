@@ -4,6 +4,7 @@ import pytest
 from app.services.advisory_engine import (
     band,
     generate_advisory,
+    generate_operation_advisory,
     generate_recommendations,
     score_heat,
     score_humidity,
@@ -214,3 +215,74 @@ class TestGenerateRecommendations:
         conditions = {"overall_risk": "low"}
         recs = generate_recommendations(conditions)
         assert recs["harvesting"]["status"] == "safe"
+
+
+class TestGenerateOperationAdvisory:
+    """Tests for generate_operation_advisory."""
+
+    def test_spraying_recommended_false_rain_high(self) -> None:
+        """Spraying blocked when rain risk is high."""
+        daily_scores = [
+            {"date": "2026-06-07", "rain_score": 40, "wind_score": 0, "rain_probability": 80.0, "wind_speed_max": 5.0},
+        ]
+        result = generate_operation_advisory("spraying", daily_scores)
+        assert result["recommended"] is False
+        assert any("Rain risk high" in r for r in result["reasons"])
+
+    def test_spraying_recommended_false_wind_high(self) -> None:
+        """Spraying blocked when wind risk is high."""
+        daily_scores = [
+            {"date": "2026-06-07", "rain_score": 0, "wind_score": 20, "rain_probability": 10.0, "wind_speed_max": 30.0},
+        ]
+        result = generate_operation_advisory("spraying", daily_scores)
+        assert result["recommended"] is False
+        assert any("Wind risk high" in r for r in result["reasons"])
+
+    def test_spraying_best_window_first_low_risk_day(self) -> None:
+        """Best window is first day where rain and wind both low."""
+        daily_scores = [
+            {"date": "2026-06-07", "rain_score": 0, "wind_score": 0, "rain_probability": 10.0, "wind_speed_max": 5.0},
+            {"date": "2026-06-08", "rain_score": 20, "wind_score": 0, "rain_probability": 40.0, "wind_speed_max": 5.0},
+        ]
+        result = generate_operation_advisory("spraying", daily_scores)
+        assert result["recommended"] is True
+        assert result["best_window"] == "2026-06-07"
+
+    def test_irrigation_priority_low_rainy(self) -> None:
+        """Irrigation low when rain probability is high."""
+        daily_scores = [{"date": "2026-06-07", "rain_score": 0, "wind_score": 0, "rain_probability": 80.0, "temperature_max": 25.0}]
+        result = generate_operation_advisory("irrigation", daily_scores)
+        assert result["priority"] == "low"
+        assert result["recommended"] is False
+
+    def test_irrigation_priority_medium_moderate_rain(self) -> None:
+        """Irrigation medium when rain probability is 40-69%."""
+        daily_scores = [{"date": "2026-06-07", "rain_score": 20, "wind_score": 0, "rain_probability": 50.0, "temperature_max": 25.0}]
+        result = generate_operation_advisory("irrigation", daily_scores)
+        assert result["priority"] == "medium"
+        assert result["recommended"] is True
+
+    def test_irrigation_priority_high_hot_dry(self) -> None:
+        """Irrigation high when rain probability <40% and temp >= 30."""
+        daily_scores = [{"date": "2026-06-07", "rain_score": 0, "wind_score": 0, "rain_probability": 30.0, "temperature_max": 35.0}]
+        result = generate_operation_advisory("irrigation", daily_scores)
+        assert result["priority"] == "high"
+        assert result["recommended"] is True
+
+    def test_irrigation_empty_scores_priority_medium(self) -> None:
+        """Irrigation with no daily scores defaults to medium priority."""
+        result = generate_operation_advisory("irrigation", [])
+        assert result["priority"] == "medium"
+        assert result["recommended"] is True
+
+    def test_harvesting_empty_scores_recommended(self) -> None:
+        """Harvesting with no daily scores is recommended."""
+        result = generate_operation_advisory("harvesting", [])
+        assert result["recommended"] is True
+
+    def test_harvesting_medium_risk_has_caution_reason(self) -> None:
+        """Harvesting medium risk includes caution in reasons."""
+        daily_scores = [{"date": "2026-06-07", "risk_band": "medium", "rain_score": 20, "wind_score": 10}]
+        result = generate_operation_advisory("harvesting", daily_scores)
+        assert result["recommended"] is True
+        assert any("medium" in r.lower() for r in result["reasons"])

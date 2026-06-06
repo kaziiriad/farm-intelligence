@@ -42,6 +42,11 @@ class Settings(BaseSettings):
 
     # Quota / limits
     tree_image_max_mb: int = int(os.environ.get("TREE_IMAGE_MAX_MB", "20"))
+    tree_quota_limit: int = int(os.environ.get("TREE_QUOTA_LIMIT", "100"))
+
+    # AI / OpenAI
+    openai_api_key: SecretStr | None = os.environ.get("OPENAI_API_KEY") or None
+    openai_base_url: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
     @model_validator(mode="after")
     def _production_requires_key(self) -> "Settings":

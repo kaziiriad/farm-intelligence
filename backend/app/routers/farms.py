@@ -40,11 +40,9 @@ async def list_farms(
     db: AsyncSession = Depends(get_db),
 ) -> FarmList:
     total = (await db.execute(select(func.count()).select_from(Farm))).scalar_one()
-    rows = (
-        await db.execute(
-            select(Farm).order_by(Farm.created_at.desc()).offset(offset).limit(limit)
-        )
-    ).scalars().all()
+    query = select(Farm).order_by(Farm.created_at.desc()).offset(offset).limit(limit)
+    rows_result = await db.execute(query)
+    rows = rows_result.scalars().all()
     return FarmList(
         items=[FarmOut.model_validate(r) for r in rows],
         total=total,

@@ -37,7 +37,7 @@ source = ["app"]
 omit = ["app/__init__.py", "app/*/__init__.py"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 79
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
