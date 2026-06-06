@@ -7,6 +7,9 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.core.database import Base
+from app.models import farm  # noqa: F401 — register Farm table for autogenerate
+
 # Alembic Config object provides access to alembic.ini values
 config = context.config
 
@@ -14,8 +17,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Metadata target — populated in Phase 1 with the farm model Base
-target_metadata = None
+# Metadata target for Alembic autogenerate.
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

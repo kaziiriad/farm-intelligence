@@ -23,6 +23,7 @@ pip-wheel-metadata/
 .pytest_cache/
 .coverage
 .coverage.*
+*.cover
 htmlcov/
 coverage.xml
 .tox/
