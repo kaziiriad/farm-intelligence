@@ -1,12 +1,11 @@
 """Tree analysis client and quota guard tests."""
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 import uuid
 
 import pytest
 
 from app.services.tree_client import TreeAnalysisClient, TreeAnalysisError
 from app.services.quota_guard import QuotaGuard
-from app.core.config import get_settings
 
 
 pytestmark = pytest.mark.asyncio
@@ -20,109 +19,118 @@ class TestTreeAnalysisClient:
         mock_http = AsyncMock()
         mock_cache = MagicMock()
 
-        with patch("app.services.tree_client.get_settings") as mock_settings:
-            s = MagicMock()
-            s.openai_api_key = MagicMock()
-            s.openai_api_key.get_secret_value.return_value = "test-key"
-            s.openai_base_url = "https://api.openai.com/v1"
-            s.tree_image_max_mb = 20
-            mock_settings.return_value = s
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "tree_count": 42,
+            "canopy_health": "good",
+            "observations": "healthy canopy coverage",
+        }
+        mock_http.get.return_value = mock_response
+        mock_http.post.return_value = mock_response
 
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.text = ""
-            mock_response.json.return_value = {
-                "choices": [{"message": {"content": '{"health_status":"healthy","confidence":0.92}'}}]
-            }
-            mock_http.post.return_value = mock_response
+        client = TreeAnalysisClient(
+            mock_http,
+            mock_cache,
+            "https://api.weather-ai.co",
+            "test-key",
+        )
+        result = await client.analyze_tree_image(b"fake-image-data", "image/png")
 
-            client = TreeAnalysisClient(mock_http, mock_cache, "https://api.openai.com/v1", "test-key")
-            result = await client.analyze_tree_image(b"fake-image-data", "image/png")
-
-        assert result["health_status"] == "healthy"
-        assert result["confidence"] == 0.92
+        assert result["tree_count"] == 42
+        assert result["canopy_health"] == "good"
+        call_kwargs = mock_http.post.call_args.kwargs
+        assert "image" in call_kwargs["files"]
 
     async def test_analyze_raises_on_api_error(self):
-        """OpenAI API error raises TreeAnalysisError."""
+        """WeatherAI API error raises TreeAnalysisError."""
         mock_http = AsyncMock()
         mock_cache = MagicMock()
 
-        with patch("app.services.tree_client.get_settings") as mock_settings:
-            s = MagicMock()
-            s.openai_api_key = MagicMock()
-            s.openai_api_key.get_secret_value.return_value = "test-key"
-            s.openai_base_url = "https://api.openai.com/v1"
-            s.tree_image_max_mb = 20
-            mock_settings.return_value = s
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = "Rate limit exceeded"
+        mock_response.json.return_value = {}
+        mock_http.post.return_value = mock_response
 
-            mock_response = MagicMock()
-            mock_response.status_code = 429
-            mock_response.text = "Rate limit exceeded"
-            mock_response.json.return_value = {}
-            mock_http.post.return_value = mock_response
+        client = TreeAnalysisClient(
+            mock_http,
+            mock_cache,
+            "https://api.weather-ai.co",
+            "test-key",
+        )
 
-            client = TreeAnalysisClient(mock_http, mock_cache, "https://api.openai.com/v1", "test-key")
-
-            with pytest.raises(TreeAnalysisError):
-                await client.analyze_tree_image(b"fake-image-data", "image/png")
+        with pytest.raises(TreeAnalysisError):
+            await client.analyze_tree_image(b"fake-image-data", "image/png")
 
 
 class TestQuotaGuard:
-    """Tests for QuotaGuard."""
+    """Tests for QuotaGuard — proxies to WeatherAI /v1/trees/quota."""
 
-    async def test_check_quota_within_limit(self, db_session):
-        """Farm under quota limit returns True and increments."""
-        guard = QuotaGuard(db_session)
-        farm_id = uuid.uuid4()
+    async def test_check_returns_true_when_quota_available(self):
+        """Within limit returns True with remaining count."""
+        mock_http = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.get.return_value = None  # no cache
 
-        result = await guard.check_and_increment(farm_id)
+        mock_quota_response = MagicMock()
+        mock_quota_response.status_code = 200
+        mock_quota_response.json.return_value = {"remaining": 4, "limit": 5, "used": 1}
+        mock_http.get.return_value = mock_quota_response
 
-        assert result is True
-        from app.models.quota import QuotaRecord
-        record = await db_session.get(QuotaRecord, (farm_id, "2026-06"))
-        assert record is not None
-        assert record.request_count == 1
+        guard = QuotaGuard(mock_http, mock_cache, "https://api.weather-ai.co", "test-key")
+        within_limit, remaining = await guard.check()
 
-    async def test_check_quota_blocks_when_limit_reached(self, db_session):
-        """Farm at quota limit returns False and does not increment."""
-        guard = QuotaGuard(db_session)
-        farm_id = uuid.uuid4()
+        assert within_limit is True
+        assert remaining == 4
+        # Cache should have been set
+        mock_cache.set.assert_called_once()
 
-        from app.models.quota import QuotaRecord
-        from datetime import datetime, timezone
-        record = QuotaRecord(
-            farm_id=farm_id,
-            month_year="2026-06",
-            request_count=100,
-            last_incremented_at=datetime.now(timezone.utc),
-        )
-        db_session.add(record)
-        await db_session.commit()
+    async def test_check_returns_false_when_quota_exhausted(self):
+        """At zero remaining returns False."""
+        mock_http = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.get.return_value = None
 
-        result = await guard.check_and_increment(farm_id)
+        mock_quota_response = MagicMock()
+        mock_quota_response.status_code = 200
+        mock_quota_response.json.return_value = {"remaining": 0, "limit": 5, "used": 5}
+        mock_http.get.return_value = mock_quota_response
 
-        assert result is False
-        from sqlalchemy import select
-        stmt = select(QuotaRecord).where(QuotaRecord.farm_id == farm_id)
-        row = (await db_session.execute(stmt)).scalar_one()
-        assert row.request_count == 100
+        guard = QuotaGuard(mock_http, mock_cache, "https://api.weather-ai.co", "test-key")
+        within_limit, remaining = await guard.check()
 
-    async def test_get_remaining_returns_correct_count(self, db_session):
-        """Remaining = limit - count."""
-        guard = QuotaGuard(db_session)
-        farm_id = uuid.uuid4()
+        assert within_limit is False
+        assert remaining == 0
 
-        from app.models.quota import QuotaRecord
-        from datetime import datetime, timezone
-        record = QuotaRecord(
-            farm_id=farm_id,
-            month_year="2026-06",
-            request_count=30,
-            last_incremented_at=datetime.now(timezone.utc),
-        )
-        db_session.add(record)
-        await db_session.commit()
+    async def test_check_uses_cached_quota(self):
+        """Repeat calls use cached value, not upstream."""
+        mock_http = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.get.return_value = '{"remaining": 3, "limit": 5, "used": 2}'
 
-        remaining = await guard.get_remaining(farm_id)
+        guard = QuotaGuard(mock_http, mock_cache, "https://api.weather-ai.co", "test-key")
+        within_limit, remaining = await guard.check()
 
-        assert remaining == 70
+        assert within_limit is True
+        assert remaining == 3
+        # No upstream call made
+        mock_http.get.assert_not_called()
+
+    async def test_get_quota_returns_upstream_data(self):
+        """get_quota returns raw upstream data."""
+        mock_http = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.get.return_value = None
+
+        mock_quota_response = MagicMock()
+        mock_quota_response.status_code = 200
+        mock_quota_response.json.return_value = {"remaining": 2, "limit": 5, "used": 3}
+        mock_http.get.return_value = mock_quota_response
+
+        guard = QuotaGuard(mock_http, mock_cache, "https://api.weather-ai.co", "test-key")
+        quota = await guard.get_quota()
+
+        assert quota["remaining"] == 2
+        assert quota["limit"] == 5
+        assert quota["used"] == 3

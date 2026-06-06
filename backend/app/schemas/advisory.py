@@ -43,6 +43,7 @@ class OperationOut(BaseModel):
     operation: str
     recommended: bool
     priority: str | None = None  # "low", "medium", "high" for irrigation
-    best_window: str | None = None  # ISO date for spraying best window
+    best_window: str | None = None  # "HH:MM-HH:MM" time window for spraying
+    window_date: str | None = None  # ISO date for the window
     reasons: list[str] = Field(default_factory=list)
     cached: bool

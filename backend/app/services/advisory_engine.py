@@ -183,9 +183,103 @@ def generate_operation_advisory(
             else:
                 recommended = True
 
+    elif operation == "planting":
+        if not daily_scores:
+            recommended = True
+        else:
+            day = daily_scores[0]
+            rain_score = day.get("rain_score", 0)
+            if rain_score >= 20:
+                reasons.append(f"Heavy rain expected on {day['date']} — risk of seed washout")
+                recommended = False
+            else:
+                recommended = True
+
+    elif operation == "field_work":
+        if not daily_scores:
+            recommended = True
+        else:
+            day = daily_scores[0]
+            risk_band = day.get("risk_band", "low")
+            if risk_band == "high":
+                reasons.append(f"Overall risk is high on {day['date']}")
+                recommended = False
+            elif risk_band == "medium":
+                reasons.append(f"Overall risk is medium on {day['date']} — proceed with caution")
+                recommended = True
+            else:
+                recommended = True
+
     return {
         "recommended": recommended,
         "priority": priority,
         "best_window": best_window,
+        "reasons": reasons,
+    }
+
+
+def generate_operation_window(
+    operation: str,
+    hourly_forecast: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compute best 2-hour window from hourly forecast for a given operation.
+
+    Returns dict with keys: recommended, best_window (HH:MM-HH:MM), window_date (YYYY-MM-DD), reasons.
+    Returns best_window=None if no suitable window found.
+    """
+    if not hourly_forecast:
+        return {"recommended": True, "best_window": None, "window_date": None, "reasons": []}
+
+    reasons: list[str] = []
+    best_window: str | None = None
+    best_window_date: str | None = None
+    recommended = True
+
+    if operation == "spraying":
+        # Find first 2h block: rain_prob < 30% AND wind < 15 km/h throughout
+        for i in range(len(hourly_forecast) - 1):
+            block = hourly_forecast[i : i + 2]
+            if len(block) < 2:
+                break
+
+            rain_ok = all(h.get("rain_probability", 0) < 30 for h in block)
+            wind_ok = all(h.get("wind_speed", 0) < 15 for h in block)
+
+            if rain_ok and wind_ok:
+                start = block[0].get("time", block[0].get("hour", ""))
+                end_hour = block[1].get("time", block[1].get("hour", ""))
+                if start and end_hour:
+                    best_window = f"{start}-{end_hour}"
+                    best_window_date = block[0].get("date", "")
+                    break
+
+        if best_window is None:
+            recommended = False
+            reasons.append("No 2-hour window with favorable conditions found today")
+
+    elif operation == "irrigation":
+        # Find first 2h block with low rain probability
+        for i in range(len(hourly_forecast) - 1):
+            block = hourly_forecast[i : i + 2]
+            if len(block) < 2:
+                break
+
+            rain_ok = all(h.get("rain_probability", 0) < 50 for h in block)
+            if rain_ok:
+                start = block[0].get("time", block[0].get("hour", ""))
+                end_hour = block[1].get("time", block[1].get("hour", ""))
+                if start and end_hour:
+                    best_window = f"{start}-{end_hour}"
+                    best_window_date = block[0].get("date", "")
+                    break
+
+        if best_window is None:
+            reasons.append("No suitable window with low rainfall found")
+
+    # harvesting, planting, field_work — no time-window concept
+    return {
+        "recommended": recommended,
+        "best_window": best_window,
+        "window_date": best_window_date,
         "reasons": reasons,
     }

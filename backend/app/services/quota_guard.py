@@ -1,62 +1,54 @@
-"""Quota guard — tracks monthly API usage per farm, enforces free-tier limit."""
+"""Quota guard — proxies tree analysis quota to WeatherAI /v1/trees/quota."""
+import json
 import uuid
-from datetime import datetime, timezone
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.config import get_settings
-from app.models.quota import QuotaRecord
+from app.core.cache import RedisCache
 
 
 class QuotaExceeded(Exception):
-    """Raised when farm exceeds monthly quota."""
+    """Raised when tree analysis quota is exhausted."""
 
 
 class QuotaGuard:
-    """Check-and-increment quota per farm per month."""
+    """Check tree analysis quota via WeatherAI upstream. No local DB write."""
 
-    def __init__(self, db: AsyncSession) -> None:
-        self._db = db
-        self._settings = get_settings()
+    def __init__(
+        self,
+        http_client,
+        cache: RedisCache,
+        base_url: str,
+        api_key: str,
+    ) -> None:
+        self._http = http_client
+        self._cache = cache
+        self._base_url = base_url
+        self._api_key = api_key
 
-    def _current_month(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m")
+    def _auth_headers(self) -> dict[str, str]:
+        if self._api_key:
+            return {"Authorization": f"Bearer {self._api_key}"}
+        return {}
 
-    async def check_and_increment(self, farm_id: uuid.UUID) -> bool:
-        """Return True if within limit and increment. False if quota exceeded."""
-        month = self._current_month()
-        limit = self._settings.tree_quota_limit
+    async def get_quota(self) -> dict[str, int]:
+        """Return current quota from upstream. Cached 60s to avoid burning quota on repeat calls."""
+        cache_key = "weather:trees_quota"
+        cached = await self._cache.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
 
-        record = await self._db.get(QuotaRecord, (farm_id, month))
+        resp = await self._http.get(
+            f"{self._base_url}/v1/trees/quota",
+            headers=self._auth_headers(),
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # Cache for 60 seconds
+        await self._cache.set(cache_key, json.dumps(data), ttl_s=60)
+        return data
 
-        if record is None:
-            # First request this month
-            new_record = QuotaRecord(
-                farm_id=farm_id,
-                month_year=month,
-                request_count=1,
-                last_incremented_at=datetime.now(timezone.utc),
-            )
-            self._db.add(new_record)
-            await self._db.flush()
-            return True
-
-        if record.request_count >= limit:
-            return False
-
-        record.request_count += 1
-        record.last_incremented_at = datetime.now(timezone.utc)
-        await self._db.flush()
-        return True
-
-    async def get_remaining(self, farm_id: uuid.UUID) -> int:
-        """Return remaining quota for current month."""
-        month = self._current_month()
-        limit = self._settings.tree_quota_limit
-
-        record = await self._db.get(QuotaRecord, (farm_id, month))
-        if record is None:
-            return limit
-
-        return max(0, limit - record.request_count)
+    async def check(self) -> tuple[bool, int]:
+        """Return (True, remaining) if within quota. (False, 0) if exhausted."""
+        quota = await self.get_quota()
+        remaining = quota.get("remaining", 0)
+        return (remaining > 0, remaining)

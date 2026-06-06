@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     # Quota / limits
     tree_image_max_mb: int = int(os.environ.get("TREE_IMAGE_MAX_MB", "20"))
-    tree_quota_limit: int = int(os.environ.get("TREE_QUOTA_LIMIT", "100"))
+    tree_quota_limit: int = int(os.environ.get("TREE_QUOTA_LIMIT", "5"))
 
     # AI / OpenAI
     openai_api_key: SecretStr | None = os.environ.get("OPENAI_API_KEY") or None

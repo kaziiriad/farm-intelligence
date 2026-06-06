@@ -5,6 +5,7 @@ from app.services.advisory_engine import (
     band,
     generate_advisory,
     generate_operation_advisory,
+    generate_operation_window,
     generate_recommendations,
     score_heat,
     score_humidity,
@@ -286,3 +287,99 @@ class TestGenerateOperationAdvisory:
         result = generate_operation_advisory("harvesting", daily_scores)
         assert result["recommended"] is True
         assert any("medium" in r.lower() for r in result["reasons"])
+
+    def test_planting_blocked_heavy_rain(self) -> None:
+        """Planting blocked when rain_score >= 20 (heavy rain risk)."""
+        daily_scores = [{"date": "2026-06-07", "rain_score": 20, "wind_score": 0, "rain_probability": 40.0, "wind_speed_max": 5.0}]
+        result = generate_operation_advisory("planting", daily_scores)
+        assert result["recommended"] is False
+        assert any("seed washout" in r.lower() for r in result["reasons"])
+
+    def test_planting_allowed_light_rain(self) -> None:
+        """Planting allowed when rain_score < 20 (light rain okay)."""
+        daily_scores = [{"date": "2026-06-07", "rain_score": 0, "wind_score": 0, "rain_probability": 10.0, "wind_speed_max": 5.0}]
+        result = generate_operation_advisory("planting", daily_scores)
+        assert result["recommended"] is True
+
+    def test_planting_empty_scores_recommended(self) -> None:
+        """Planting with no daily scores is recommended."""
+        result = generate_operation_advisory("planting", [])
+        assert result["recommended"] is True
+
+    def test_field_work_blocked_high_risk(self) -> None:
+        """Field work blocked when overall risk is high."""
+        daily_scores = [{"date": "2026-06-07", "risk_band": "high", "rain_score": 40, "wind_score": 20}]
+        result = generate_operation_advisory("field_work", daily_scores)
+        assert result["recommended"] is False
+        assert any("high" in r.lower() for r in result["reasons"])
+
+    def test_field_work_caution_medium_risk(self) -> None:
+        """Field work with caution when overall risk is medium."""
+        daily_scores = [{"date": "2026-06-07", "risk_band": "medium", "rain_score": 20, "wind_score": 10}]
+        result = generate_operation_advisory("field_work", daily_scores)
+        assert result["recommended"] is True
+        assert any("medium" in r.lower() for r in result["reasons"])
+
+    def test_field_work_safe_low_risk(self) -> None:
+        """Field work safe when overall risk is low."""
+        daily_scores = [{"date": "2026-06-07", "risk_band": "low", "rain_score": 0, "wind_score": 0}]
+        result = generate_operation_advisory("field_work", daily_scores)
+        assert result["recommended"] is True
+
+    def test_field_work_empty_scores_recommended(self) -> None:
+        """Field work with no daily scores is recommended."""
+        result = generate_operation_advisory("field_work", [])
+        assert result["recommended"] is True
+
+
+class TestGenerateOperationWindow:
+    """Tests for generate_operation_window."""
+
+    def test_spraying_window_finds_2h_block(self) -> None:
+        """Spraying: first 2h block with rain_prob < 30% AND wind < 15."""
+        hourly = [
+            {"time": "07:00", "date": "2026-06-07", "rain_probability": 20, "wind_speed": 10},
+            {"time": "08:00", "date": "2026-06-07", "rain_probability": 25, "wind_speed": 12},
+            {"time": "09:00", "date": "2026-06-07", "rain_probability": 50, "wind_speed": 8},
+        ]
+        result = generate_operation_window("spraying", hourly)
+        assert result["recommended"] is True
+        assert result["best_window"] == "07:00-08:00"
+        assert result["window_date"] == "2026-06-07"
+
+    def test_spraying_no_window_found(self) -> None:
+        """Spraying: no suitable 2h block found."""
+        hourly = [
+            {"time": "07:00", "date": "2026-06-07", "rain_probability": 50, "wind_speed": 10},
+            {"time": "08:00", "date": "2026-06-07", "rain_probability": 20, "wind_speed": 20},  # wind too high
+        ]
+        result = generate_operation_window("spraying", hourly)
+        assert result["recommended"] is False
+        assert result["best_window"] is None
+        assert len(result["reasons"]) > 0
+
+    def test_irrigation_window_finds_low_rain_block(self) -> None:
+        """Irrigation: first 2h block with rain_prob < 50%."""
+        hourly = [
+            {"time": "06:00", "date": "2026-06-07", "rain_probability": 30, "wind_speed": 10},
+            {"time": "07:00", "date": "2026-06-07", "rain_probability": 20, "wind_speed": 8},
+            {"time": "08:00", "date": "2026-06-07", "rain_probability": 60, "wind_speed": 5},
+        ]
+        result = generate_operation_window("irrigation", hourly)
+        assert result["recommended"] is True
+        assert result["best_window"] == "06:00-07:00"
+        assert result["window_date"] == "2026-06-07"
+
+    def test_harvesting_no_window_concept(self) -> None:
+        """Harvesting has no time-window concept."""
+        hourly = [{"time": "07:00", "date": "2026-06-07", "rain_probability": 20, "wind_speed": 10}]
+        result = generate_operation_window("harvesting", hourly)
+        assert result["recommended"] is True
+        assert result["best_window"] is None
+        assert result["window_date"] is None
+
+    def test_empty_hourly_returns_recommended_true(self) -> None:
+        """Empty hourly forecast returns recommended=True with no window."""
+        result = generate_operation_window("spraying", [])
+        assert result["recommended"] is True
+        assert result["best_window"] is None
