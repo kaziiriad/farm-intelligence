@@ -30,6 +30,27 @@ export function getApiBaseUrl(): string {
   return raw.replace(/\/+$/, "");
 }
 
+function buildRequestUrl(path: string): URL {
+  const base = getApiBaseUrl();
+  if (!/^https?:\/\//i.test(base)) {
+    throw new ApiError(
+      0,
+      `Invalid API base URL "${base}". Set VITE_API_BASE_URL and API_INTERNAL_BASE_URL to a full https:// URL.`,
+      null,
+    );
+  }
+
+  try {
+    return new URL(path.startsWith("/") ? path : `/${path}`, base);
+  } catch {
+    throw new ApiError(
+      0,
+      `Invalid API base URL "${base}". Set VITE_API_BASE_URL and API_INTERNAL_BASE_URL to a full https:// URL.`,
+      null,
+    );
+  }
+}
+
 function extractDetail(body: unknown, status: number): string {
   if (body && typeof body === "object") {
     const b = body as Record<string, unknown>;
@@ -68,8 +89,7 @@ export async function request<T>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {
-  const base = getApiBaseUrl();
-  const finalUrl = new URL(base + (path.startsWith("/") ? path : `/${path}`));
+  const finalUrl = buildRequestUrl(path);
   if (opts.query) {
     for (const [k, v] of Object.entries(opts.query)) {
       if (v === undefined || v === null) continue;
